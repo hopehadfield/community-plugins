@@ -155,6 +155,10 @@ jobs:
               echo "Remote branch exists, checking it out"
               git fetch origin "$BRANCH_NAME"
               git checkout -b "$BRANCH_NAME" "origin/$BRANCH_NAME"
+
+              echo "Re-installing workspace dependencies..."
+              cd workspaces/${{ matrix.workspace }}
+              yarn install --immutable
           else
               echo "Creating new branch"
               git checkout -b "$BRANCH_NAME"
