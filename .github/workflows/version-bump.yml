@@ -49,6 +49,10 @@ jobs:
         with:
           fetch-depth: 1
 
+      # FOR TESTING ONLY
+      - name: 'Fetch all branches'
+        run: git fetch --all
+
       # Beginning of yarn setup
       - name: use node.js 20.x
         uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4
