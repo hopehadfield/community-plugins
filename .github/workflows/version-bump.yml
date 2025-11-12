@@ -105,6 +105,9 @@ jobs:
           script: |
             const workspace = '${{ matrix.workspace }}';
 
+            console.log(`Searching for existing PRs in ${context.repo.owner}/${context.repo.repo}`);
+            console.log(`Looking for workspace: ${workspace}`);
+
             const allOpenPRs = await github.paginate(github.rest.pulls.list, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -113,10 +116,18 @@ jobs:
               per_page: 100
             });
 
+            console.log(`Total open PRs found: ${allOpenPRs.length}`);
+            console.log('All PR titles and branches:');
+            allOpenPRs.forEach(pr => {
+              console.log(`  - PR #${pr.number}: "${pr.title}" (branch: ${pr.head.ref})`);
+            });
+
             const workspacePRs = allOpenPRs.filter(pr =>
               pr.title.startsWith(`${workspace} - version:bump`) &&
               pr.head.ref.startsWith(`${workspace}/`)
             );
+
+            console.log(`Filtered PRs matching "${workspace} - version:bump" and "${workspace}/": ${workspacePRs.length}`);
 
             if (workspacePRs.length > 0) {
               workspacePRs.sort((a, b) =>
