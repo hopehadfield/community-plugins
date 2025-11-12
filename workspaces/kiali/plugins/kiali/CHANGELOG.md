@@ -1,5 +1,15 @@
 ### Dependencies
 
+## 1.45.0
+
+### Minor Changes
+
+- b9ac9d9: The provider doesn't need to match the cluster
+
+### Patch Changes
+
+- e6bd3fc: Updated dependency `cytoscape` to `3.33.1`.
+
 ## 1.44.0
 
 ### Minor Changes
