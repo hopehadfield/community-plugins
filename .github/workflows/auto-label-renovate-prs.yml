@@ -1,0 +1,131 @@
+name: Auto-label aged Renovate PRs
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run daily at 6 AM UTC
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  label-aged-prs:
+    name: Label aged Renovate PRs as force-merge
+    runs-on: ubuntu-latest
+    # TODO: Uncomment before merging to main
+    # if: github.repository == 'backstage/community-plugins'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
+      - name: Label aged Renovate PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Thresholds for adding force-merge label
+            const PATCH_MINOR_FORCE_MERGE_DAYS = 14; // 2 weeks
+            const MAJOR_FORCE_MERGE_DAYS = 42; // 6 weeks
+
+            // Thresholds for posting reminder comments
+            const PATCH_MINOR_REMINDER_DAYS = 0; // 1 week
+            const MAJOR_REMINDER_DAYS = 0; // 3 weeks
+
+            // Marker to identify our reminder comments (to avoid duplicates)
+            const REMINDER_MARKER = '<!-- renovate-pr-reminder -->';
+
+            const now = new Date();
+
+            // Fetch all open PRs from backstage-goalie[bot]
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+            });
+
+            const renovatePrs = prs.filter(pr => pr.user.login === 'hopehadfield');
+            // const renovatePrs = prs.filter(pr => pr.user.login === 'backstage-goalie[bot]');
+
+            console.log(`Found ${renovatePrs.length} open Renovate PRs`);
+
+            for (const pr of renovatePrs) {
+              const createdAt = new Date(pr.created_at);
+              const ageInDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+
+              const hasForceLabel = pr.labels.some(label => label.name === 'force-merge');
+              if (hasForceLabel) {
+                console.log(`PR #${pr.number} already has force-merge label, skipping`);
+                continue;
+              }
+
+              // Determine if this is a major bump by checking the PR title and branch
+              // - Major: "to v3" (just major version, no minor/patch)
+              // - Minor/Patch: "to v1.4.0" (full semver)
+              const title = pr.title.toLowerCase();
+              const branch = pr.head.ref.toLowerCase();
+
+              const hasExplicitMajor = title.includes('(major)') ||
+                                       title.includes('major update') ||
+                                       branch.includes('/major-') ||
+                                       branch.includes('-major');
+
+              // This regex matches "to v" followed by digits, then end of string or non-digit non-dot
+              const majorOnlyPattern = /to v?(\d+)(?:\s|$|[^\d.])/i;
+              const hasMajorOnlyVersion = majorOnlyPattern.test(title);
+
+              const isMajor = hasExplicitMajor || hasMajorOnlyVersion;
+
+              const reminderAge = isMajor ? MAJOR_REMINDER_DAYS : PATCH_MINOR_REMINDER_DAYS;
+              const forceMergeAge = isMajor ? MAJOR_FORCE_MERGE_DAYS : PATCH_MINOR_FORCE_MERGE_DAYS;
+              const bumpType = isMajor ? 'major' : 'patch/minor';
+
+              console.log(`PR #${pr.number}: "${pr.title}" - ${bumpType} bump, ${ageInDays} days old (reminder: ${reminderAge}d, force-merge: ${forceMergeAge}d)`);
+
+              // Add force-merge label if old enough
+              if (ageInDays >= forceMergeAge) {
+                console.log(`  -> Adding force-merge label to PR #${pr.number}`);
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: ['force-merge']
+                });
+              }
+              // Post reminder comment if old enough but not yet force-merge age
+              else if (ageInDays >= reminderAge) {
+                // Check if we've already posted a reminder
+                const comments = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                });
+
+                const hasReminder = comments.data.some(c => c.body.includes(REMINDER_MARKER));
+
+                if (!hasReminder) {
+                  const daysUntilForceMerge = forceMergeAge - ageInDays;
+                  const reminderMessage = [
+                    REMINDER_MARKER,
+                    `👋 **Reminder:** This Renovate ${bumpType} PR has been open for **${ageInDays} days**.`,
+                    '',
+                    `Please review and merge if the changes look good. If no action is taken, this PR will be labeled \`force-merge\` in **${daysUntilForceMerge} days**.`
+                  ].join('\n');
+
+                  console.log(`  -> Posting reminder comment to PR #${pr.number}`);
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    body: reminderMessage
+                  });
+                } else {
+                  console.log(`  -> PR #${pr.number} already has reminder comment, skipping`);
+                }
+              }
+            }
+
+            console.log('Done processing Renovate PRs');
